@@ -1,4 +1,4 @@
-# NVIDIA Linux Open GPU Kernel Module Source
+# NVIDIA Linux Open GPU Kernel Module Source (Gamers edition)
 
 This is the source release of the NVIDIA Linux open GPU kernel modules,
 version 515.65.01.
