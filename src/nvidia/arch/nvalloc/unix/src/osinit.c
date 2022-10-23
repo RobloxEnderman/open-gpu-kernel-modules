@@ -58,6 +58,7 @@
 #include <nvSha256.h>
 #include <gpu/gsp/kernel_gsp.h>
 #include <logdecode.h>
+#include <gpu/fsp/kern_fsp.h>
 
 #include <mem_mgr/virt_mem_mgr.h>
 
@@ -362,10 +363,6 @@ osHandleGpuLost
     pmc_boot_0 = NV_PRIV_REG_RD32(nv->regs->map_u, NV_PMC_BOOT_0);
     if (pmc_boot_0 != nvp->pmc_boot_0)
     {
-        RM_API *pRmApi = rmapiGetInterface(RMAPI_GPU_LOCK_INTERNAL);
-        NV2080_CTRL_GPU_GET_OEM_BOARD_INFO_PARAMS *pBoardInfoParams;
-        NV_STATUS status;
-
         //
         // This doesn't support PEX Reset and Recovery yet.
         // This will help to prevent accessing registers of a GPU
@@ -376,24 +373,11 @@ osHandleGpuLost
 
         NV_DEV_PRINTF(NV_DBG_ERRORS, nv, "GPU has fallen off the bus.\n");
 
-        pBoardInfoParams = portMemAllocNonPaged(sizeof(*pBoardInfoParams));
-        if (pBoardInfoParams != NULL)
+        if (pGpu->boardInfo != NULL && pGpu->boardInfo->serialNumber[0] != '\0')
         {
-            portMemSet(pBoardInfoParams, 0, sizeof(*pBoardInfoParams));
-
-            status = pRmApi->Control(pRmApi, nv->rmapi.hClient,
-                                     nv->rmapi.hSubDevice,
-                                     NV2080_CTRL_CMD_GPU_GET_OEM_BOARD_INFO,
-                                     pBoardInfoParams,
-                                     sizeof(*pBoardInfoParams));
-            if (status == NV_OK)
-            {
-                NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
-                              "GPU serial number is %s.\n",
-                              pBoardInfoParams->serialNumber);
-            }
-
-            portMemFree(pBoardInfoParams);
+            NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+                          "GPU serial number is %s.\n",
+                          pGpu->boardInfo->serialNumber);
         }
 
         gpuSetDisconnectedProperties(pGpu);
@@ -1672,6 +1656,17 @@ NvBool RmInitAdapter(
         goto shutdown;
     }
 
+    KernelFsp *pKernelFsp = GPU_GET_KERNEL_FSP(pGpu);
+    if ((pKernelFsp != NULL) && !IS_GSP_CLIENT(pGpu) && !IS_VIRTUAL(pGpu))
+    {
+        status.rmStatus = kfspSendBootCommands_HAL(pGpu, pKernelFsp);
+        if (status.rmStatus != NV_OK)
+        {
+            NV_PRINTF(LEVEL_ERROR, "FSP boot command failed.\n");
+            goto shutdown;
+        }
+    }
+
     RmSetConsolePreservationParams(pGpu);
 
     //
@@ -1847,7 +1842,7 @@ NvBool RmInitAdapter(
     RmInitS0ixPowerManagement(nv);
     RmInitDeferredDynamicPowerManagement(nv);
 
-    if (!NV_IS_SOC_DISPLAY_DEVICE(nv))
+    if (!NV_IS_SOC_DISPLAY_DEVICE(nv) && !NV_IS_SOC_IGPU_DEVICE(nv))
     {
         status.rmStatus = RmRegisterGpudb(pGpu);
         if (status.rmStatus != NV_OK)

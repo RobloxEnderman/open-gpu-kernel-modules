@@ -50,10 +50,13 @@
 #include "vgpu/vgpu_events.h"
 #include "virtualization/hypervisor/hypervisor.h"
 #include "finn_rm_api.h"
+#include "os/os.h"
 
 #define SDK_ALL_CLASSES_INCLUDE_FULL_HEADER
 #include "g_allclasses.h"
 #undef SDK_ALL_CLASSES_INCLUDE_FULL_HEADER
+#include "nverror.h"
+
 
 #define RPC_STRUCTURES
 #define RPC_GENERIC_UNION
@@ -265,8 +268,11 @@ static NV_STATUS _issueRpcLarge
     // should not be called in broadcast mode
     NV_ASSERT_OR_RETURN(!gpumgrGetBcEnabledStatus(pGpu), NV_ERR_INVALID_STATE);
 
+    //
     // Copy the initial buffer
-    entryLength = NV_MIN(bufSize, pRpc->maxRpcSize);
+    // Temporary black magic WAR for bug 3594082: reducing the size by 1
+    //
+    entryLength = NV_MIN(bufSize, pRpc->maxRpcSize - 1);
 
     if ((NvU8 *)vgpu_rpc_message_header_v != pBuf8)
         portMemCopy(vgpu_rpc_message_header_v, entryLength, pBuf8, entryLength);
@@ -291,8 +297,11 @@ static NV_STATUS _issueRpcLarge
     remainingSize -= entryLength;
     pBuf8   += entryLength;
 
+    //
     // Copy the remaining buffers
-    entryLength = pRpc->maxRpcSize - sizeof(rpc_message_header_v);
+    // Temporary black magic WAR for bug 3594082: reducing the size by 1
+    //
+    entryLength = pRpc->maxRpcSize - sizeof(rpc_message_header_v) - 1;
     while (remainingSize != 0)
     {
         if (entryLength > remainingSize)
@@ -990,6 +999,18 @@ NV_STATUS rpcGetStaticInfo_v1A_05(OBJGPU *pGpu, OBJRPC *pRpc)
     return status;
 }
 
+NV_STATUS rpcGetStaticInfo_v20_01(OBJGPU *pGpu, OBJRPC *pRpc)
+{
+    NV_STATUS status = NV_OK;
+    return status;
+}
+
+NV_STATUS rpcGetStaticInfo_v20_04(OBJGPU *pGpu, OBJRPC *pRpc)
+{
+    NV_STATUS status = NV_OK;
+    return status;
+}
+
 NV_STATUS rpcGetGspStaticInfo_v14_00(OBJGPU *pGpu, OBJRPC *pRpc)
 {
     NV_STATUS status = NV_ERR_NOT_SUPPORTED;
@@ -1252,7 +1273,10 @@ NV_STATUS rpcGspSetSystemInfo_v17_00
         {
             rpcInfo->simAccessBufPhysAddr = 0;
         }
+        rpcInfo->pcieAtomicsOpMask = GPU_GET_KERNEL_BIF(pGpu) ?
+            GPU_GET_KERNEL_BIF(pGpu)->osPcieAtomicsOpMask : 0U;
         rpcInfo->consoleMemSize = GPU_GET_MEMORY_MANAGER(pGpu)->Ram.ReservedConsoleDispMemSize;
+        rpcInfo->maxUserVa      = osGetMaxUserVa();
 
         OBJCL *pCl = SYS_GET_CL(SYS_GET_INSTANCE());
         if (pCl != NULL)

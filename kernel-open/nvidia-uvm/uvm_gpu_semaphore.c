@@ -1,5 +1,5 @@
 /*******************************************************************************
-    Copyright (c) 2015 NVIDIA Corporation
+    Copyright (c) 2015-2022 NVIDIA Corporation
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to
@@ -25,6 +25,7 @@
 #include "uvm_lock.h"
 #include "uvm_global.h"
 #include "uvm_kvmalloc.h"
+#include "uvm_channel.h" // For UVM_GPU_SEMAPHORE_MAX_JUMP
 
 #define UVM_SEMAPHORE_SIZE 4
 #define UVM_SEMAPHORE_PAGE_SIZE PAGE_SIZE
@@ -133,7 +134,11 @@ static NV_STATUS pool_alloc_page(uvm_gpu_semaphore_pool_t *pool)
 
     pool_page->pool = pool;
 
-    status = uvm_rm_mem_alloc_and_map_all(pool->gpu, UVM_RM_MEM_TYPE_SYS, UVM_SEMAPHORE_PAGE_SIZE, &pool_page->memory);
+    status = uvm_rm_mem_alloc_and_map_all(pool->gpu,
+                                          UVM_RM_MEM_TYPE_SYS,
+                                          UVM_SEMAPHORE_PAGE_SIZE,
+                                          0,
+                                          &pool_page->memory);
     if (status != NV_OK)
         goto error;
 
@@ -320,7 +325,7 @@ NV_STATUS uvm_gpu_semaphore_pool_map_gpu(uvm_gpu_semaphore_pool_t *pool, uvm_gpu
     uvm_mutex_lock(&pool->mutex);
 
     list_for_each_entry(page, &pool->pages, all_pages_node) {
-        status = uvm_rm_mem_map_gpu(page->memory, gpu);
+        status = uvm_rm_mem_map_gpu(page->memory, gpu, 0);
         if (status != NV_OK)
             goto done;
     }
@@ -467,8 +472,15 @@ static NvU64 update_completed_value_locked(uvm_gpu_tracking_semaphore_t *trackin
     // push, it's easily guaranteed because of the small number of GPFIFO
     // entries available per channel (there could be at most as many pending
     // pushes as GPFIFO entries).
-    if (new_sem_value < old_sem_value)
+    if (unlikely(new_sem_value < old_sem_value))
         new_value += 1ULL << 32;
+
+    // Check for unexpected large jumps of the semaphore value
+    UVM_ASSERT_MSG_RELEASE(new_value - old_value <= UVM_GPU_SEMAPHORE_MAX_JUMP,
+                           "GPU %s unexpected semaphore (CPU VA 0x%llx) jump from 0x%llx to 0x%llx\n",
+                           tracking_semaphore->semaphore.page->pool->gpu->parent->name,
+                           (NvU64)(uintptr_t)tracking_semaphore->semaphore.payload,
+                           old_value, new_value);
 
     // Use an atomic write even though the spinlock is held so that the value can
     // be (carefully) read atomically outside of the lock.

@@ -59,6 +59,9 @@
 
 #define NVKMS_LOG_PREFIX "nvidia-modeset: "
 
+static bool output_rounding_fix = true;
+module_param_named(output_rounding_fix, output_rounding_fix, bool, 0400);
+
 /* These parameters are used for fault injection tests.  Normally the defaults
  * should be used. */
 MODULE_PARM_DESC(fail_malloc, "Fail the Nth call to nvkms_alloc");
@@ -71,116 +74,16 @@ module_param_named(malloc_verbose, malloc_verbose, bool, 0400);
 
 static atomic_t nvkms_alloc_called_count;
 
+NvBool nvkms_output_rounding_fix(void)
+{
+    return output_rounding_fix;
+}
 
 #define NVKMS_SYNCPT_STUBS_NEEDED
 
 /*************************************************************************
  * NVKMS interface for nvhost unit for sync point APIs.
  *************************************************************************/
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #ifdef NVKMS_SYNCPT_STUBS_NEEDED
 /* Unsupported STUB for nvkms_syncpt APIs */
@@ -1728,11 +1631,7 @@ module_init(nvkms_init);
 module_exit(nvkms_exit);
 
 #if defined(MODULE_LICENSE)
-
   MODULE_LICENSE("Dual MIT/GPL");
-
-
-
 #endif
 #if defined(MODULE_INFO)
   MODULE_INFO(supported, "external");

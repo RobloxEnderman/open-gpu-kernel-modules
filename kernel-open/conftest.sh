@@ -55,9 +55,13 @@ append_conftest() {
     done
 }
 
-translate_and_preprocess_header_files() {
-    # Inputs:
-    #   $1: list of relative file paths
+test_header_presence() {
+    #
+    # Determine if the given header file (which may or may not be
+    # present) is provided by the target kernel.
+    #
+    # Input:
+    #   $1: relative file path
     #
     # This routine creates an upper case, underscore version of each of the
     # relative file paths, and uses that as the token to either define or
@@ -73,115 +77,25 @@ translate_and_preprocess_header_files() {
     # strings, without special handling of the beginning or the end of the line.
     TEST_CFLAGS=`echo "-E -M $CFLAGS " | sed -e 's/\( -M[DG]\)* / /g'`
 
-    for file in "$@"; do
-        file_define=NV_`echo $file | tr '/.' '_' | tr '-' '_' | tr 'a-z' 'A-Z'`_PRESENT
+    file="$1"
+    file_define=NV_`echo $file | tr '/.' '_' | tr '-' '_' | tr 'a-z' 'A-Z'`_PRESENT
 
-        CODE="#include <$file>"
+    CODE="#include <$file>"
 
-        if echo "$CODE" | $CC $TEST_CFLAGS - > /dev/null 2>&1; then
-            echo "#define $file_define"
+    if echo "$CODE" | $CC $TEST_CFLAGS - > /dev/null 2>&1; then
+        echo "#define $file_define"
+    else
+        # If preprocessing failed, it could have been because the header
+        # file under test is not present, or because it is present but
+        # depends upon the inclusion of other header files. Attempting
+        # preprocessing again with -MG will ignore a missing header file
+        # but will still fail if the header file is present.
+        if echo "$CODE" | $CC $TEST_CFLAGS -MG - > /dev/null 2>&1; then
+            echo "#undef $file_define"
         else
-            # If preprocessing failed, it could have been because the header
-            # file under test is not present, or because it is present but
-            # depends upon the inclusion of other header files. Attempting
-            # preprocessing again with -MG will ignore a missing header file
-            # but will still fail if the header file is present.
-            if echo "$CODE" | $CC $TEST_CFLAGS -MG - > /dev/null 2>&1; then
-                echo "#undef $file_define"
-            else
-                echo "#define $file_define"
-            fi
+            echo "#define $file_define"
         fi
-    done
-}
-
-test_headers() {
-    #
-    # Determine which header files (of a set that may or may not be
-    # present) are provided by the target kernel.
-    #
-    FILES="asm/system.h"
-    FILES="$FILES drm/drmP.h"
-    FILES="$FILES drm/drm_auth.h"
-    FILES="$FILES drm/drm_gem.h"
-    FILES="$FILES drm/drm_crtc.h"
-    FILES="$FILES drm/drm_atomic.h"
-    FILES="$FILES drm/drm_atomic_helper.h"
-    FILES="$FILES drm/drm_encoder.h"
-    FILES="$FILES drm/drm_atomic_uapi.h"
-    FILES="$FILES drm/drm_drv.h"
-    FILES="$FILES drm/drm_framebuffer.h"
-    FILES="$FILES drm/drm_connector.h"
-    FILES="$FILES drm/drm_probe_helper.h"
-    FILES="$FILES drm/drm_blend.h"
-    FILES="$FILES drm/drm_fourcc.h"
-    FILES="$FILES drm/drm_prime.h"
-    FILES="$FILES drm/drm_plane.h"
-    FILES="$FILES drm/drm_vblank.h"
-    FILES="$FILES drm/drm_file.h"
-    FILES="$FILES drm/drm_ioctl.h"
-    FILES="$FILES drm/drm_device.h"
-    FILES="$FILES drm/drm_mode_config.h"
-    FILES="$FILES dt-bindings/interconnect/tegra_icc_id.h"
-    FILES="$FILES generated/autoconf.h"
-    FILES="$FILES generated/compile.h"
-    FILES="$FILES generated/utsrelease.h"
-    FILES="$FILES linux/efi.h"
-    FILES="$FILES linux/kconfig.h"
-    FILES="$FILES linux/platform/tegra/mc_utils.h"
-    FILES="$FILES linux/semaphore.h"
-    FILES="$FILES linux/printk.h"
-    FILES="$FILES linux/ratelimit.h"
-    FILES="$FILES linux/prio_tree.h"
-    FILES="$FILES linux/log2.h"
-    FILES="$FILES linux/of.h"
-    FILES="$FILES linux/bug.h"
-    FILES="$FILES linux/sched/signal.h"
-    FILES="$FILES linux/sched/task.h"
-    FILES="$FILES linux/sched/task_stack.h"
-    FILES="$FILES xen/ioemu.h"
-    FILES="$FILES linux/fence.h"
-    FILES="$FILES linux/dma-resv.h"
-    FILES="$FILES soc/tegra/chip-id.h"
-    FILES="$FILES soc/tegra/fuse.h"
-    FILES="$FILES soc/tegra/tegra_bpmp.h"
-    FILES="$FILES video/nv_internal.h"
-    FILES="$FILES linux/platform/tegra/dce/dce-client-ipc.h"
-    FILES="$FILES linux/nvhost.h"
-    FILES="$FILES linux/nvhost_t194.h"
-    FILES="$FILES asm/book3s/64/hash-64k.h"
-    FILES="$FILES asm/set_memory.h"
-    FILES="$FILES asm/prom.h"
-    FILES="$FILES asm/powernv.h"
-    FILES="$FILES linux/atomic.h"
-    FILES="$FILES asm/barrier.h"
-    FILES="$FILES asm/opal-api.h"
-    FILES="$FILES sound/hdaudio.h"
-    FILES="$FILES asm/pgtable_types.h"
-    FILES="$FILES linux/stringhash.h"
-    FILES="$FILES linux/dma-map-ops.h"
-    FILES="$FILES rdma/peer_mem.h"
-    FILES="$FILES sound/hda_codec.h"
-    FILES="$FILES linux/dma-buf.h"
-    FILES="$FILES linux/time.h"
-    FILES="$FILES linux/platform_device.h"
-    FILES="$FILES linux/mutex.h"
-    FILES="$FILES linux/reset.h"
-    FILES="$FILES linux/of_platform.h"
-    FILES="$FILES linux/of_device.h"
-    FILES="$FILES linux/of_gpio.h"
-    FILES="$FILES linux/gpio.h"
-    FILES="$FILES linux/gpio/consumer.h"
-    FILES="$FILES linux/interconnect.h"
-    FILES="$FILES linux/pm_runtime.h"
-    FILES="$FILES linux/clk.h"
-    FILES="$FILES linux/clk-provider.h"
-    FILES="$FILES linux/ioasid.h"
-    FILES="$FILES linux/stdarg.h"
-    FILES="$FILES linux/iosys-map.h"
-    FILES="$FILES asm/coco.h"
-
-    translate_and_preprocess_header_files $FILES
+    fi
 }
 
 build_cflags() {
@@ -2460,10 +2374,41 @@ compile_test() {
             # linux-4.4.168 cherry-picked commit 768ae309a961 without
             # c12d2da56d0e which is covered in Conftest #3.
             #
+
+            #
+            # This function sets the NV_GET_USER_PAGES_* macros as per the below
+            # passing conftest's
+            #
+            set_get_user_pages_defines () {
+                if [ "$1" = "NV_GET_USER_PAGES_HAS_ARGS_WRITE_FORCE" ]; then
+                    echo "#define NV_GET_USER_PAGES_HAS_ARGS_WRITE_FORCE" | append_conftest "functions"
+                else
+                    echo "#undef NV_GET_USER_PAGES_HAS_ARGS_WRITE_FORCE" | append_conftest "functions"
+                fi
+
+                if [ "$1" = "NV_GET_USER_PAGES_HAS_ARGS_TSK_WRITE_FORCE" ]; then
+                    echo "#define NV_GET_USER_PAGES_HAS_ARGS_TSK_WRITE_FORCE" | append_conftest "functions"
+                else
+                    echo "#undef NV_GET_USER_PAGES_HAS_ARGS_TSK_WRITE_FORCE" | append_conftest "functions"
+                fi
+
+                if [ "$1" = "NV_GET_USER_PAGES_HAS_ARGS_TSK_FLAGS" ]; then
+                    echo "#define NV_GET_USER_PAGES_HAS_ARGS_TSK_FLAGS" | append_conftest "functions"
+                else
+                    echo "#undef NV_GET_USER_PAGES_HAS_ARGS_TSK_FLAGS" | append_conftest "functions"
+                fi
+
+                if [ "$1" = "NV_GET_USER_PAGES_HAS_ARGS_FLAGS" ]; then
+                    echo "#define NV_GET_USER_PAGES_HAS_ARGS_FLAGS" | append_conftest "functions"
+                else
+                    echo "#undef NV_GET_USER_PAGES_HAS_ARGS_FLAGS" | append_conftest "functions"
+                fi
+            }
+
             # Conftest #1: Check if get_user_pages accepts 6 arguments.
             # Return if true.
             # Fall through to conftest #2 on failure.
-            #
+
             echo "$CONFTEST_PREAMBLE
             #include <linux/mm.h>
             long get_user_pages(unsigned long start,
@@ -2478,8 +2423,7 @@ compile_test() {
             $CC $CFLAGS -c conftest$$.c > /dev/null 2>&1
             rm -f conftest$$.c
             if [ -f conftest$$.o ]; then
-                echo "#define NV_GET_USER_PAGES_HAS_WRITE_AND_FORCE_ARGS" | append_conftest "functions"
-                echo "#undef NV_GET_USER_PAGES_HAS_TASK_STRUCT" | append_conftest "functions"
+                set_get_user_pages_defines "NV_GET_USER_PAGES_HAS_ARGS_WRITE_FORCE"
                 rm -f conftest$$.o
                 return
             fi
@@ -2504,8 +2448,7 @@ compile_test() {
             rm -f conftest$$.c
 
             if [ -f conftest$$.o ]; then
-                echo "#undef NV_GET_USER_PAGES_HAS_WRITE_AND_FORCE_ARGS" | append_conftest "functions"
-                echo "#undef NV_GET_USER_PAGES_HAS_TASK_STRUCT" | append_conftest "functions"
+                set_get_user_pages_defines "NV_GET_USER_PAGES_HAS_ARGS_FLAGS"
                 rm -f conftest$$.o
                 return
             fi
@@ -2532,14 +2475,12 @@ compile_test() {
             rm -f conftest$$.c
 
             if [ -f conftest$$.o ]; then
-                echo "#undef NV_GET_USER_PAGES_HAS_WRITE_AND_FORCE_ARGS" | append_conftest "functions"
-                echo "#define NV_GET_USER_PAGES_HAS_TASK_STRUCT" | append_conftest "functions"
+                set_get_user_pages_defines "NV_GET_USER_PAGES_HAS_ARGS_TSK_FLAGS"
                 rm -f conftest$$.o
                 return
             fi
 
-            echo "#define NV_GET_USER_PAGES_HAS_WRITE_AND_FORCE_ARGS" | append_conftest "functions"
-            echo "#define NV_GET_USER_PAGES_HAS_TASK_STRUCT" | append_conftest "functions"
+            set_get_user_pages_defines "NV_GET_USER_PAGES_HAS_ARGS_TSK_WRITE_FORCE"
 
             return
         ;;
@@ -2566,10 +2507,47 @@ compile_test() {
             # commit 64019a2e467a ("mm/gup: remove task_struct pointer for
             # all gup code") in v5.9-rc1 (2020-08-11).
             #
+
+            #
+            # This function sets the NV_GET_USER_PAGES_REMOTE_* macros as per
+            # the below passing conftest's
+            #
+            set_get_user_pages_remote_defines () {
+                if [ "$1" = "" ]; then
+                    echo "#undef NV_GET_USER_PAGES_REMOTE_PRESENT" | append_conftest "functions"
+                else
+                    echo "#define NV_GET_USER_PAGES_REMOTE_PRESENT" | append_conftest "functions"
+                fi
+
+                if [ "$1" = "NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_WRITE_FORCE" ]; then
+                    echo "#define NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_WRITE_FORCE" | append_conftest "functions"
+                else
+                    echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_WRITE_FORCE" | append_conftest "functions"
+                fi
+
+                if [ "$1" = "NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_FLAGS" ]; then
+                    echo "#define NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_FLAGS" | append_conftest "functions"
+                else
+                    echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_FLAGS" | append_conftest "functions"
+                fi
+
+                if [ "$1" = "NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_FLAGS_LOCKED" ]; then
+                    echo "#define NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_FLAGS_LOCKED" | append_conftest "functions"
+                else
+                    echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_FLAGS_LOCKED" | append_conftest "functions"
+                fi
+
+                if [ "$1" = "NV_GET_USER_PAGES_REMOTE_HAS_ARGS_FLAGS_LOCKED" ]; then
+                    echo "#define NV_GET_USER_PAGES_REMOTE_HAS_ARGS_FLAGS_LOCKED" | append_conftest "functions"
+                else
+                    echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_ARGS_FLAGS_LOCKED" | append_conftest "functions"
+                fi
+            }
+
             # conftest #1: check if get_user_pages_remote() is available
             # return if not available.
             # Fall through to conftest #2 if it is present
-            #
+
             echo "$CONFTEST_PREAMBLE
             #include <linux/mm.h>
             void conftest_get_user_pages_remote(void) {
@@ -2580,10 +2558,7 @@ compile_test() {
             rm -f conftest$$.c
 
             if [ -f conftest$$.o ]; then
-                echo "#undef NV_GET_USER_PAGES_REMOTE_PRESENT" | append_conftest "functions"
-                echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_TSK_ARG" | append_conftest "functions"
-                echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_WRITE_AND_FORCE_ARGS" | append_conftest "functions"
-                echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_LOCKED_ARG" | append_conftest "functions"
+                set_get_user_pages_remote_defines ""
                 rm -f conftest$$.o
                 return
             fi
@@ -2593,7 +2568,6 @@ compile_test() {
             # force arguments. Return if these arguments are present
             # Fall through to conftest #3 if these args are absent.
             #
-            echo "#define NV_GET_USER_PAGES_REMOTE_PRESENT" | append_conftest "functions"
             echo "$CONFTEST_PREAMBLE
             #include <linux/mm.h>
             long get_user_pages_remote(struct task_struct *tsk,
@@ -2611,18 +2585,40 @@ compile_test() {
             rm -f conftest$$.c
 
             if [ -f conftest$$.o ]; then
-                echo "#define NV_GET_USER_PAGES_REMOTE_HAS_TSK_ARG" | append_conftest "functions"
-                echo "#define NV_GET_USER_PAGES_REMOTE_HAS_WRITE_AND_FORCE_ARGS" | append_conftest "functions"
-                echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_LOCKED_ARG" | append_conftest "functions"
+                set_get_user_pages_remote_defines "NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_WRITE_FORCE"
                 rm -f conftest$$.o
                 return
             fi
 
-            echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_WRITE_AND_FORCE_ARGS" | append_conftest "functions"
+            #
+            # conftest #3: check if get_user_pages_remote() has gpu_flags
+            # arguments. Return if these arguments are present
+            # Fall through to conftest #4 if these args are absent.
+            #
+            echo "$CONFTEST_PREAMBLE
+            #include <linux/mm.h>
+            long get_user_pages_remote(struct task_struct *tsk,
+                                       struct mm_struct *mm,
+                                       unsigned long start,
+                                       unsigned long nr_pages,
+                                       unsigned int gpu_flags,
+                                       struct page **pages,
+                                       struct vm_area_struct **vmas) {
+                return 0;
+            }" > conftest$$.c
+
+            $CC $CFLAGS -c conftest$$.c > /dev/null 2>&1
+            rm -f conftest$$.c
+
+            if [ -f conftest$$.o ]; then
+                set_get_user_pages_remote_defines "NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_FLAGS"
+                rm -f conftest$$.o
+                return
+            fi
 
             #
-            # conftest #3: check if get_user_pages_remote() has locked argument
-            # Return if these arguments are present. Fall through to conftest #4
+            # conftest #4: check if get_user_pages_remote() has locked argument
+            # Return if these arguments are present. Fall through to conftest #5
             # if these args are absent.
             #
             echo "$CONFTEST_PREAMBLE
@@ -2642,14 +2638,13 @@ compile_test() {
             rm -f conftest$$.c
 
             if [ -f conftest$$.o ]; then
-                echo "#define NV_GET_USER_PAGES_REMOTE_HAS_TSK_ARG" | append_conftest "functions"
-                echo "#define NV_GET_USER_PAGES_REMOTE_HAS_LOCKED_ARG" | append_conftest "functions"
+                set_get_user_pages_remote_defines "NV_GET_USER_PAGES_REMOTE_HAS_ARGS_TSK_FLAGS_LOCKED"
                 rm -f conftest$$.o
                 return
             fi
 
             #
-            # conftest #4: check if get_user_pages_remote() does not take
+            # conftest #5: check if get_user_pages_remote() does not take
             # tsk argument.
             #
             echo "$CONFTEST_PREAMBLE
@@ -2668,13 +2663,8 @@ compile_test() {
             rm -f conftest$$.c
 
             if [ -f conftest$$.o ]; then
-                echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_TSK_ARG" | append_conftest "functions"
-                echo "#define NV_GET_USER_PAGES_REMOTE_HAS_LOCKED_ARG" | append_conftest "functions"
+                set_get_user_pages_remote_defines "NV_GET_USER_PAGES_REMOTE_HAS_ARGS_FLAGS_LOCKED"
                 rm -f conftest$$.o
-            else
-
-                echo "#define NV_GET_USER_PAGES_REMOTE_HAS_TSK_ARG" | append_conftest "functions"
-                echo "#undef NV_GET_USER_PAGES_REMOTE_HAS_LOCKED_ARG" | append_conftest "functions"
             fi
         ;;
 
@@ -5288,6 +5278,22 @@ compile_test() {
             rm -f conftest$$.c
         ;;
 
+        platform_irq_count)
+            #
+            # Determine if the platform_irq_count() function is present
+            #
+            # platform_irq_count was added by commit
+            # 4b83555d5098e73cf2c5ca7f86c17ca0ba3b968e ("driver-core: platform: Add platform_irq_count()")
+            # in 4.5-rc1 (2016-01-07)
+            #
+            CODE="
+            #include <linux/platform_device.h>
+            int conftest_platform_irq_count(void) {
+                return platform_irq_count();
+            }"
+            compile_check_conftest "$CODE" "NV_PLATFORM_IRQ_COUNT_PRESENT" "" "functions"
+        ;;
+
         dma_resv_add_fence)
             #
             # Determine if the dma_resv_add_fence() function is present.
@@ -5364,6 +5370,23 @@ compile_test() {
             }"
 
             compile_check_conftest "$CODE" "NV_GET_TASK_IOPRIO_PRESENT" "" "functions"
+        ;;
+
+        num_registered_fb)
+            #
+            # Determine if 'num_registered_fb' variable is present.
+            #
+            # 'num_registered_fb' was removed by commit 5727dcfd8486
+            # ("fbdev: Make registered_fb[] private to fbmem.c) for
+            # v5.20 linux-next (2022-07-27).
+            #
+            CODE="
+            #include <linux/fb.h>
+            int conftest_num_registered_fb(void) {
+                return num_registered_fb;
+            }"
+
+            compile_check_conftest "$CODE" "NV_NUM_REGISTERED_FB_PRESENT" "" "types"
         ;;
 
         # When adding a new conftest entry, please use the correct format for
@@ -5764,14 +5787,14 @@ case "$5" in
     ;;
 
 
-    test_kernel_headers)
+    test_kernel_header)
         #
-        # Check for the availability of certain kernel headers
+        # Check for the availability of the given kernel header
         #
 
         CFLAGS=$6
 
-        test_headers
+        test_header_presence "${7}"
 
         for file in conftest*.d; do
             rm -f $file > /dev/null 2>&1

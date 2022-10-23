@@ -319,6 +319,7 @@ int nv_encode_caching(
             break;
 #if defined(NV_PGPROT_WRITE_COMBINED) && \
     defined(NV_PGPROT_WRITE_COMBINED_DEVICE)
+        case NV_MEMORY_DEFAULT:
         case NV_MEMORY_WRITECOMBINED:
             if (NV_ALLOW_WRITE_COMBINING(memory_type))
             {
@@ -530,7 +531,7 @@ int nvidia_mmap_helper(
             else
             {
                 if (nv_encode_caching(&vma->vm_page_prot,
-                        rm_disable_iomap_wc() ? NV_MEMORY_UNCACHED : NV_MEMORY_WRITECOMBINED, 
+                        rm_disable_iomap_wc() ? NV_MEMORY_UNCACHED : mmap_context->caching, 
                         NV_MEMORY_TYPE_FRAMEBUFFER))
                 {
                     if (nv_encode_caching(&vma->vm_page_prot,
