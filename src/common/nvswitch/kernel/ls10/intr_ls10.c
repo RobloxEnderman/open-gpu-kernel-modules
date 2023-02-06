@@ -46,6 +46,7 @@
 
 #include "nvswitch/ls10/dev_nvlw_ip.h"
 #include "nvswitch/ls10/dev_minion_ip.h"
+#include "nvswitch/ls10/dev_minion_ip_addendum.h"
 #include "nvswitch/ls10/dev_cpr_ip.h"
 #include "nvswitch/ls10/dev_nvlipt_ip.h"
 #include "nvswitch/ls10/dev_nvlipt_lnk_ip.h"
@@ -455,6 +456,8 @@ _nvswitch_initialize_nport_interrupts_ls10
     nvswitch_device *device
 )
 {
+// Moving this L2 register access to SOE. Refer bug #3747687 
+#if 0 
     NvU32 val;
 
     val =
@@ -462,6 +465,7 @@ _nvswitch_initialize_nport_interrupts_ls10
         DRF_NUM(_NPORT, _ERR_CONTROL_COMMON_NPORT, _FATALENABLE, 1) |
         DRF_NUM(_NPORT, _ERR_CONTROL_COMMON_NPORT, _NONFATALENABLE, 1);
     NVSWITCH_NPORT_BCAST_WR32_LS10(device, _NPORT, _ERR_CONTROL_COMMON_NPORT, val);
+#endif // 0
 
     _nvswitch_initialize_route_interrupts(device);
     _nvswitch_initialize_ingress_interrupts(device);
@@ -494,7 +498,10 @@ _nvswitch_initialize_nxbar_interrupts_ls10
         DRF_NUM(_NXBAR_TILE, _ERR_FATAL_INTR_EN, _INGRESS_SIDEBAND_PARITY_ERROR, 1) |
         DRF_NUM(_NXBAR_TILE, _ERR_FATAL_INTR_EN, _INGRESS_REDUCTION_PKT_ERROR, 1);
 
+// Moving this L2 register access to SOE. Refer bug #3747687
+#if 0
     NVSWITCH_BCAST_WR32_LS10(device, NXBAR, _NXBAR_TILE, _ERR_FATAL_INTR_EN, report_fatal);
+#endif // 0
 
     chip_device->intr_mask.tile.fatal = report_fatal;
     chip_device->intr_mask.tile.nonfatal = 0;
@@ -509,7 +516,10 @@ _nvswitch_initialize_nxbar_interrupts_ls10
         DRF_NUM(_NXBAR_TILEOUT, _ERR_FATAL_INTR_EN, _INGRESS_BURST_GT_9_DATA_VC, 1)  |
         DRF_NUM(_NXBAR_TILEOUT, _ERR_FATAL_INTR_EN, _EGRESS_CDT_PARITY_ERROR, 1);
 
+// Moving this L2 register access to SOE. Refer bug #3747687 
+#if 0
     NVSWITCH_BCAST_WR32_LS10(device, NXBAR, _NXBAR_TILEOUT, _ERR_FATAL_INTR_EN, report_fatal);
+#endif // 0
 
     chip_device->intr_mask.tileout.fatal = report_fatal;
     chip_device->intr_mask.tileout.nonfatal = 0;
@@ -4282,6 +4292,7 @@ _nvswitch_service_nvldl_fatal_ls10
     NvU64 enabledLinkMask, localLinkMask, localEnabledLinkMask, runtimeErrorMask = 0;
     NvU32 i;
     nvlink_link *link;
+    NvU32 clocksMask = NVSWITCH_PER_LINK_CLOCK_SET(RXCLK) | NVSWITCH_PER_LINK_CLOCK_SET(TXCLK);
     NvlStatus status = -NVL_MORE_PROCESSING_REQUIRED;
     NVSWITCH_LINK_TRAINING_ERROR_INFO linkTrainingErrorInfo = { 0 };
     NVSWITCH_LINK_RUNTIME_ERROR_INFO linkRuntimeErrorInfo = { 0 };
@@ -4306,7 +4317,8 @@ _nvswitch_service_nvldl_fatal_ls10
             break;
         }
 
-        if (nvswitch_is_link_in_reset(device, link))
+        if (nvswitch_is_link_in_reset(device, link) ||
+            !nvswitch_are_link_clocks_on_ls10(device, link, clocksMask))
         {
             continue;
         }
@@ -4853,23 +4865,6 @@ _nvswitch_service_nvltlc_rx_lnk_fatal_1_ls10
     return NVL_SUCCESS;
 }
 
-static NvBool
-_nvswitch_is_ncisoc_clock_off_ls10
-(
-    nvswitch_device *device,
-    nvlink_link     *link
-)
-{
-    NvU32 clkStatus;
-    clkStatus = NVSWITCH_LINK_RD32_LS10(device, link->linkNumber,
-            NVLIPT_LNK, _NVLIPT_LNK, _CTRL_CLK_CTRL);
-    if(FLD_TEST_DRF(_NVLIPT_LNK, _CTRL_CLK_CTRL, _NCISOCCLK_STS, _OFF, clkStatus))
-    {
-        return NV_TRUE;
-    }
-    return NV_FALSE;
-}
-
 NvlStatus
 _nvswitch_service_nvltlc_fatal_ls10
 (
@@ -4908,7 +4903,7 @@ _nvswitch_service_nvltlc_fatal_ls10
         // as the IP's registers are off
         //
         if (nvswitch_is_link_in_reset(device, link) ||
-            _nvswitch_is_ncisoc_clock_off_ls10(device, link))
+            !nvswitch_are_link_clocks_on_ls10(device, link,NVSWITCH_PER_LINK_CLOCK_SET(NCISOCCLK)));
         {
             continue;
         }
@@ -5341,6 +5336,10 @@ _nvswitch_emit_link_errors_nvldl_nonfatal_link_ls10
     bit = DRF_NUM(_NVLDL_TOP, _INTR, _RX_SHORT_ERROR_RATE, 1);
     if (nvswitch_test_flags(pending, bit))
     {
+        // Disable further interrupts
+        nvlink_link *nvlink = nvswitch_get_link(device, link);
+        nvlink->errorThreshold.bInterruptTrigerred = NV_TRUE;
+        nvswitch_configure_error_rate_threshold_interrupt_ls10(nvlink, NV_FALSE);
         NVSWITCH_REPORT_NONFATAL(_HW_DLPL_RX_SHORT_ERROR_RATE, "RX Short Error Rate");
     }
 }
@@ -5449,6 +5448,20 @@ _nvswitch_deferred_link_state_check_ls10
     chip_device = NVSWITCH_GET_CHIP_DEVICE_LS10(device);
     pLink = nvswitch_get_link(device, pErrorReportParams->link);
 
+    // If is there a retry for reset_and_drain then re-create the state check for the current link
+    if (chip_device->deferredLinkErrors[link].bResetAndDrainRetry == NV_TRUE)
+    {
+        if (pErrorReportParams)
+        {
+            nvswitch_os_free(pErrorReportParams);
+        }
+
+        chip_device->deferredLinkErrors[link].bLinkErrorsCallBackEnabled = NV_FALSE;
+        chip_device->deferredLinkErrors[link].bResetAndDrainRetry = NV_FALSE;
+        nvswitch_create_deferred_link_state_check_task_ls10(device, nvlipt_instance, link);
+        return;
+    }
+
     if ((pLink == NULL) ||
         (device->hal.nvswitch_corelib_get_dl_link_mode(pLink, &linkState) != NVL_SUCCESS) ||
          ((linkState != NVLINK_LINKSTATE_HS) && (linkState != NVLINK_LINKSTATE_SLEEP)))
@@ -5461,8 +5474,8 @@ _nvswitch_deferred_link_state_check_ls10
     chip_device->deferredLinkErrors[link].bLinkStateCallBackEnabled = NV_FALSE;
 }
 
-static void
-_nvswitch_create_deferred_link_state_check_task_ls10
+void
+nvswitch_create_deferred_link_state_check_task_ls10
 (
     nvswitch_device *device,
     NvU32 nvlipt_instance,
@@ -5527,7 +5540,7 @@ _nvswitch_deferred_link_errors_check_ls10
     bit = DRF_NUM(_NVLDL_TOP, _INTR, _LTSSM_FAULT_UP, 1);
     if (nvswitch_test_flags(pending, bit))
     {
-        _nvswitch_create_deferred_link_state_check_task_ls10(device, nvlipt_instance, link);
+        nvswitch_create_deferred_link_state_check_task_ls10(device, nvlipt_instance, link);
     }
     else
     {
@@ -5535,7 +5548,10 @@ _nvswitch_deferred_link_errors_check_ls10
         _nvswitch_clear_deferred_link_errors_ls10(device, link);
     }
 
+    if (pErrorReportParams)
+    {
     nvswitch_os_free(pErrorReportParams);
+    }
     chip_device->deferredLinkErrors[link].bLinkErrorsCallBackEnabled = NV_FALSE;
 }
 
@@ -5555,6 +5571,8 @@ _nvswitch_create_deferred_link_errors_task_ls10
     {
         return;
     }
+
+    chip_device->deferredLinkErrors[link].bResetAndDrainRetry = NV_FALSE;
 
     status = NVL_ERR_GENERIC;
     pErrorReportParams = nvswitch_os_malloc(sizeof(NVSWITCH_DEFERRED_ERROR_REPORTING_ARGS));
@@ -5688,7 +5706,7 @@ _nvswitch_service_nvldl_nonfatal_ls10
     nvlink_link *link;
     NvlStatus status;
     NvlStatus return_status = -NVL_NOT_FOUND;
-
+    NvU32 clocksMask = NVSWITCH_PER_LINK_CLOCK_SET(RXCLK) | NVSWITCH_PER_LINK_CLOCK_SET(TXCLK);
     enabledLinkMask = nvswitch_get_enabled_link_mask(device);
     localLinkMask = NVSWITCH_NVLIPT_GET_LOCAL_LINK_MASK64_LS10(nvlipt_instance);
     localEnabledLinkMask = enabledLinkMask & localLinkMask;
@@ -5709,7 +5727,8 @@ _nvswitch_service_nvldl_nonfatal_ls10
             break;
         }
 
-        if (nvswitch_is_link_in_reset(device, link))
+        if (nvswitch_is_link_in_reset(device, link) ||
+            !nvswitch_are_link_clocks_on_ls10(device, link, clocksMask))
         {
             continue;
         }
@@ -6100,7 +6119,7 @@ _nvswitch_service_nvltlc_nonfatal_ls10
         // as the IP's registers are off
         //
         if (nvswitch_is_link_in_reset(device, link) ||
-            _nvswitch_is_ncisoc_clock_off_ls10(device, link))
+            !nvswitch_are_link_clocks_on_ls10(device, link, NVSWITCH_PER_LINK_CLOCK_SET(NCISOCCLK)))
         {
             continue;
         }
@@ -6205,6 +6224,8 @@ _nvswitch_service_nvlipt_lnk_nonfatal_ls10
 )
 {
     ls10_device *chip_device = NVSWITCH_GET_CHIP_DEVICE_LS10(device);
+    nvlink_link *link_info = nvswitch_get_link(device, link);
+    NvU32 lnkStateRequest, lnkStateStatus;
     NVSWITCH_INTERRUPT_LOG_TYPE report = { 0 };
     NvU32 pending, bit, unhandled;
 
@@ -6231,6 +6252,32 @@ _nvswitch_service_nvlipt_lnk_nonfatal_ls10
     bit = DRF_NUM(_NVLIPT_LNK, _ERR_STATUS_0, _FAILEDMINIONREQUEST, 1);
     if (nvswitch_test_flags(pending, bit))
     {
+        //
+        // Read back LINK_STATE_REQUESTS and LINK_STATE_STATUS registers
+        // If request == ACTIVE, LINK_STATE_STATUS == ACTIVE_PENDING, request == ERROR
+        // and there is a pending FAULT_UP interrupt then redo reset_and_drain since the
+        // last try failed
+        //
+        // Mark that the defered link error mechanism as seeing a reset_and_train re-try so
+        // the deferred task needs to re-create itself instead of continuing with the linkstate
+        // checks
+        //
+        lnkStateStatus = NVSWITCH_LINK_RD32_LS10(device, link_info->linkNumber, NVLIPT_LNK,
+                            _NVLIPT_LNK, _CTRL_LINK_STATE_STATUS);
+
+        lnkStateRequest = NVSWITCH_LINK_RD32_LS10(device, link_info->linkNumber,
+                            NVLIPT_LNK , _NVLIPT_LNK , _CTRL_LINK_STATE_REQUEST);
+
+        if(FLD_TEST_DRF(_NVLIPT_LNK, _CTRL_LINK_STATE_REQUEST, _REQUEST, _ACTIVE, lnkStateRequest)                &&
+           !(FLD_TEST_DRF(_NVLIPT_LNK, _CTRL_LINK_STATE_REQUEST, _STATUS, _REQUEST_SUCCESSFUL, lnkStateRequest)  ||
+             FLD_TEST_DRF(_NVLIPT_LNK, _CTRL_LINK_STATE_REQUEST, _STATUS, _INIT, lnkStateRequest))&&
+             FLD_TEST_DRF(_NVLIPT_LNK, _CTRL_LINK_STATE_STATUS, _CURRENTLINKSTATE, _ACTIVE_PENDING, lnkStateStatus) &&
+             DRF_NUM(_NVLDL_TOP, _INTR, _LTSSM_FAULT_UP, 1) & chip_device->deferredLinkErrors[link].fatalIntrMask.dl)
+        {
+            chip_device->deferredLinkErrors[link].bResetAndDrainRetry = NV_TRUE;
+            device->hal.nvswitch_reset_and_drain_links(device, NVBIT64(link));
+        }
+
         chip_device->deferredLinkErrors[link].nonFatalIntrMask.liptLnk |= bit;
         _nvswitch_create_deferred_link_errors_task_ls10(device, nvlipt_instance, link);
         nvswitch_clear_flags(&unhandled, bit);
@@ -6295,18 +6342,24 @@ _nvswitch_service_nvlipt_link_nonfatal_ls10
     NvU32 interruptingLinks = 0;
     NvU32 lnkStatusChangeLinks = 0;
     NvlStatus status;
-
+    NvU64 link_enable_mask;
+    
+    link_enable_mask = ((NvU64)device->regkeys.link_enable_mask2 << 32 |
+        (NvU64)device->regkeys.link_enable_mask);
     for (i = 0; i < NVSWITCH_LINKS_PER_NVLIPT_LS10; ++i)
     {
         globalLink = (instance * NVSWITCH_LINKS_PER_NVLIPT_LS10) + i;
-
+        if ((NVBIT64(globalLink) & link_enable_mask) == 0)
+        {
+            continue;
+        }
         intrLink = NVSWITCH_LINK_RD32(device, globalLink, NVLIPT_LNK, _NVLIPT_LNK, _ERR_STATUS_0);
 
         if(intrLink)
         {
             interruptingLinks |= NVBIT(i);
         }
-
+        
        intrLink = NVSWITCH_LINK_RD32(device, globalLink, NVLIPT_LNK, _NVLIPT_LNK, _INTR_STATUS);
 
         if(intrLink)
@@ -6426,6 +6479,7 @@ _nvswitch_service_nvlw_nonfatal_ls10
 {
     NvlStatus status[3];
 
+    // TODO: @achaudhry invert handling so nvlipt_lnk is first
     status[0] = _nvswitch_service_nvldl_nonfatal_ls10(device, instance);
     status[1] = _nvswitch_service_nvltlc_nonfatal_ls10(device, instance);
     status[2] = _nvswitch_service_nvlipt_link_nonfatal_ls10(device, instance);
@@ -6592,12 +6646,12 @@ _nvswitch_service_nvlw_fatal_ls10
     status[5] = _nvswitch_service_nvlipt_link_fatal_ls10(device, instance);
 
 
-    if (status[0] != NVL_SUCCESS &&
-        status[1] != NVL_SUCCESS &&
-        status[2] != NVL_SUCCESS &&
-        status[3] != NVL_SUCCESS &&
-        status[4] != NVL_SUCCESS &&
-        status[5] != NVL_SUCCESS)
+    if (status[0] != NVL_SUCCESS && status[0] != -NVL_NOT_FOUND &&
+        status[1] != NVL_SUCCESS && status[1] != -NVL_NOT_FOUND &&
+        status[2] != NVL_SUCCESS && status[2] != -NVL_NOT_FOUND &&
+        status[3] != NVL_SUCCESS && status[3] != -NVL_NOT_FOUND &&
+        status[4] != NVL_SUCCESS && status[4] != -NVL_NOT_FOUND &&
+        status[5] != NVL_SUCCESS && status[5] != -NVL_NOT_FOUND)
     {
         return -NVL_MORE_PROCESSING_REQUIRED;
     }
@@ -7111,6 +7165,7 @@ nvswitch_service_nvldl_fatal_link_ls10
     bit = DRF_NUM(_NVLDL_TOP, _INTR, _LTSSM_FAULT_UP, 1);
     if (nvswitch_test_flags(pending, bit))
     {
+
         chip_device->deferredLinkErrors[link].fatalIntrMask.dl |= bit;
         _nvswitch_create_deferred_link_errors_task_ls10(device, nvlipt_instance, link);
             

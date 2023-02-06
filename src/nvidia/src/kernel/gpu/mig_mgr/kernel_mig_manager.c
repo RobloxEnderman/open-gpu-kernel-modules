@@ -124,7 +124,7 @@ kmigmgrMakeCIReference_IMPL
 
 /*! @brief create a Ref referencing no GI/CI */
 MIG_INSTANCE_REF
-kmigmgrMakeNoMIGReference_IMPL()
+kmigmgrMakeNoMIGReference_IMPL(void)
 {
     MIG_INSTANCE_REF ref = { NULL, NULL };
     return ref;
@@ -6717,9 +6717,10 @@ kmigmgrGetNextComputeSize_IMPL
 
         for (i = 1; i < NV_ARRAY_ELEMENTS(computeSizeFlags) - 1; i++)
             if (computeSizeFlags[i] == computeSize)
-                break;
+                return (bGetNextSmallest) ? computeSizeFlags[i + 1] : computeSizeFlags[i - 1];
 
-        return (bGetNextSmallest) ? computeSizeFlags[i + 1] : computeSizeFlags[i - 1];
+        // Requested input flag was not found
+        return KMIGMGR_COMPUTE_SIZE_INVALID;
     }
 }
 

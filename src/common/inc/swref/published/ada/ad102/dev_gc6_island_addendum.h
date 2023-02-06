@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2016-2017 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2003-2022 NVIDIA CORPORATION & AFFILIATES
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,40 +21,12 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#ifndef __ad102_dev_gc6_island_addendum_h__
+#define __ad102_dev_gc6_island_addendum_h__
 
-/**
- * @file
- * @brief THREAD module implementation for Unix kernelmode
- *
- * This implementation uses the NVIDIA OS interface into the unix kernels.
- */
+#define NV_PGC6_BSI_VPR_SECURE_SCRATCH_15                                           NV_PGC6_BSI_SECURE_SCRATCH_15
+#define NV_PGC6_BSI_VPR_SECURE_SCRATCH_15_SCRUBBER_HANDOFF                                                  31:29
+#define NV_PGC6_BSI_VPR_SECURE_SCRATCH_15_SCRUBBER_HANDOFF_DONE                                        0x00000003
 
-#if !PORT_IS_KERNEL_BUILD
-#error "This file can only be compiled as part of the kernel build."
-#endif
-
-#if !NVOS_IS_UNIX
-#error "This file can only be compiled on Unix."
-#endif
-
-#include "nvport/nvport.h"
-#include "os-interface.h"
-
-// Invalid value for thread.
-const PORT_THREAD PORT_THREAD_INVALID = {0ULL};
-
-// Invalid value for process.
-const PORT_PROCESS PORT_PROCESS_INVALID = {0ULL};
-
-NvU64 portThreadGetCurrentThreadId(void)
-{
-    NvU64 tid = 0;
-    os_get_current_thread(&tid);
-    return tid;
-}
-
-void portThreadYield(void)
-{
-    os_schedule();
-}
+#endif // __ad102_dev_gc6_island_addendum_h__
 

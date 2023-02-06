@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2017-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -743,6 +743,15 @@ nvswitch_init_soe
     return device->hal.nvswitch_init_soe(device);
 }
 
+void
+nvswitch_soe_init_l2_state
+(
+    nvswitch_device *device
+)
+{
+    device->hal.nvswitch_soe_init_l2_state(device);
+}
+
 static NvlStatus
 _nvswitch_construct_soe
 (
@@ -1327,6 +1336,7 @@ nvswitch_lib_initialize_device
     NvU8 link_num;
     nvlink_link *link = NULL;
     NvBool is_blacklisted_by_os = NV_FALSE;
+    NvU64 mode;
 
     if (!NVSWITCH_IS_DEVICE_ACCESSIBLE(device))
     {
@@ -1488,6 +1498,19 @@ nvswitch_lib_initialize_device
         }
 
         nvswitch_reset_persistent_link_hw_state(device, link_num);
+
+        if(_nvswitch_corelib_get_dl_link_mode(link, &mode) != NVL_SUCCESS)
+        {
+            NVSWITCH_PRINT(device, ERROR, "%s: nvlipt_lnk_status: Failed to check link mode! LinkId %d\n",
+                        __FUNCTION__, link_num);
+        }
+        else if(mode == NVLINK_LINKSTATE_FAULT)
+        {
+            NVSWITCH_PRINT(device, INFO, "%s: retraining LinkId %d\n",
+                        __FUNCTION__, link_num);
+            nvswitch_reset_and_train_link(device, link);
+        }
+
     }
 
     retval = nvswitch_set_training_mode(device);
@@ -2995,9 +3018,15 @@ _nvswitch_ctrl_unregister_link
         return -NVL_BAD_ARGS;
     }
 
+    // With ALI in FW, links can be unregistered while Active
+    if (!device->nvlink_device->enableALI)
+    {
+
     if (device->hal.nvswitch_is_link_in_use(device, params->portNum))
     {
         return -NVL_ERR_STATE_IN_USE;
+    }
+
     }
 
     nvlink_lib_unregister_link(link);
@@ -3215,6 +3244,22 @@ _nvswitch_ctrl_inband_pending_data_stats
     }
 
     return NVL_SUCCESS;
+}
+
+static NvlStatus
+_nvswitch_ctrl_get_board_part_number
+(
+    nvswitch_device *device,
+    NVSWITCH_GET_BOARD_PART_NUMBER_VECTOR *p
+)
+{
+    if (!nvswitch_is_inforom_supported(device))
+    {
+        NVSWITCH_PRINT(device, ERROR, "InfoROM is not supported\n");
+        return -NVL_ERR_NOT_SUPPORTED;
+    }
+
+    return device->hal.nvswitch_ctrl_get_board_part_number(device, p);
 }
 
 static NvlStatus
@@ -4607,6 +4652,16 @@ nvswitch_launch_ALI_link_training
     return device->hal.nvswitch_launch_ALI_link_training(device, link, bSync);
 }
 
+NvlStatus
+nvswitch_reset_and_train_link
+(
+    nvswitch_device *device,
+    nvlink_link     *link
+)
+{
+    return device->hal.nvswitch_reset_and_train_link(device, link);
+}
+
 static NvlStatus
 _nvswitch_ctrl_get_err_info
 (
@@ -4645,6 +4700,26 @@ nvswitch_load_link_disable_settings
 )
 {
     device->hal.nvswitch_load_link_disable_settings(device, link);
+}
+
+static NvlStatus
+_nvswitch_ctrl_set_nvlink_error_threshold
+(
+    nvswitch_device *device,
+    NVSWITCH_SET_NVLINK_ERROR_THRESHOLD_PARAMS *pParams
+)
+{
+    return device->hal.nvswitch_ctrl_set_nvlink_error_threshold(device, pParams);
+}
+
+static NvlStatus
+_nvswitch_ctrl_get_nvlink_error_threshold
+(
+    nvswitch_device *device,
+    NVSWITCH_GET_NVLINK_ERROR_THRESHOLD_PARAMS *pParams
+)
+{
+    return device->hal.nvswitch_ctrl_get_nvlink_error_threshold(device, pParams);
 }
 
 NvlStatus
@@ -4952,6 +5027,9 @@ nvswitch_lib_ctrl
                 _nvswitch_ctrl_inband_pending_data_stats,
                 NVSWITCH_INBAND_PENDING_DATA_STATS_PARAMS,
                 osPrivate, flags);
+        NVSWITCH_DEV_CMD_DISPATCH(CTRL_NVSWITCH_GET_BOARD_PART_NUMBER,
+                _nvswitch_ctrl_get_board_part_number,
+                NVSWITCH_GET_BOARD_PART_NUMBER_VECTOR);
         NVSWITCH_DEV_CMD_DISPATCH_PRIVILEGED(
                 CTRL_NVSWITCH_GET_SW_INFO,
                 _nvswitch_ctrl_get_sw_info,
@@ -4973,6 +5051,13 @@ nvswitch_lib_ctrl
                 _nvswitch_ctrl_clear_counters,
                 NVSWITCH_NVLINK_CLEAR_COUNTERS_PARAMS,
                 osPrivate, flags);
+        NVSWITCH_DEV_CMD_DISPATCH_PRIVILEGED(CTRL_NVSWITCH_SET_NVLINK_ERROR_THRESHOLD,
+                _nvswitch_ctrl_set_nvlink_error_threshold,
+                NVSWITCH_SET_NVLINK_ERROR_THRESHOLD_PARAMS,
+                osPrivate, flags);
+        NVSWITCH_DEV_CMD_DISPATCH(CTRL_NVSWITCH_GET_NVLINK_ERROR_THRESHOLD,
+                _nvswitch_ctrl_get_nvlink_error_threshold,
+                NVSWITCH_GET_NVLINK_ERROR_THRESHOLD_PARAMS);
 
         default:
             nvswitch_os_print(NVSWITCH_DBG_LEVEL_INFO, "unknown ioctl %x\n", cmd);
